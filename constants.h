@@ -14,4 +14,5 @@ __constant__ double d_sigma;
 __constant__ double d_tol;
 __constant__ int d_iter;
 
+
 #endif 

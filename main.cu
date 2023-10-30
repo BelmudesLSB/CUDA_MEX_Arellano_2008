@@ -173,7 +173,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     
     // ! Take all the results to the host:
     cs = cudaMemcpy(V, d_V, parms.b_grid_size * parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
-    if (cs != cudaSuccess) {
+    if (cs != cudaSuccess){
         mexPrintf("Error copying data from device to host for V: %s\n", cudaGetErrorString(cs));
     }
     cs = cudaMemcpy(V_d, d_V_d_1, parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
