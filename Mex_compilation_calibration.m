@@ -1,15 +1,15 @@
 %% Clear all:
-clc
-clear all
+clc;
+clear all;
 
 %% Compile the MEXCUDA file:
 mexcuda main.cu aux_host.cpp arellano.cu
 
 %% Calibrate the model:
-params.b_grid_size = 50;                % Number of points in the grid for the bond price.
+params.b_grid_size = 1024;              % Number of points in the grid for the bond price.
 params.b_grid_min = -0.8;               % Minimum value of the bond price.
 params.b_grid_max = 0.00;               % Maximum value of the bond price.
-params.y_grid_size = 2;                 % Number of points in the grid for the income.
+params.y_grid_size = 12;                % Number of points in the grid for the income.
 params.y_default = 10;                  % Maxsimum income under default.
 params.beta = 0.953;                    % Discount factor.
 params.gamma = 2;                       % Risk aversion.

@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cuda_runtime.h>
+#include "constants.h"
 #include "mex.h"
 #include "aux_host.h"
 #include "arellano.h"
@@ -41,7 +42,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     double* p_grid = new double[parms.y_grid_size*parms.y_grid_size];
     double* y_grid_under_default = new double[parms.y_grid_size];
     double* V = new double[parms.b_grid_size*parms.y_grid_size];
-    double* V_d = new double[parms.b_grid_size*parms.y_grid_size];
+    double* V_d = new double[parms.y_grid_size];
     double* V_r = new double[parms.b_grid_size*parms.y_grid_size];
     double* Q = new double[parms.b_grid_size*parms.y_grid_size];
     int* default_policy = new int[parms.b_grid_size*parms.y_grid_size];
@@ -58,8 +59,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     double* d_y_grid;
     double* d_p_grid;
     double* d_y_grid_under_default;
-    double* d_V_0;
-    double* d_V_1;
+    double* d_V;
     double* d_V_d_0;
     double* d_V_d_1;
     double* d_V_r_0;
@@ -87,19 +87,15 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     if (cs != cudaSuccess) {
         mexPrintf("Error allocating memory in the device for y_grid_under_default: %s\n", cudaGetErrorString(cs));
     }
-    cs = cudaMalloc((void**)&d_V_0, parms.b_grid_size*parms.y_grid_size*sizeof(double));
+    cs = cudaMalloc((void**)&d_V, parms.b_grid_size*parms.y_grid_size*sizeof(double));
     if (cs != cudaSuccess) {
         mexPrintf("Error allocating memory in the device for V: %s\n", cudaGetErrorString(cs));
     }
-    cs = cudaMalloc((void**)&d_V_1, parms.b_grid_size*parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for V: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_V_d_0, parms.b_grid_size*parms.y_grid_size*sizeof(double));
+    cs = cudaMalloc((void**)&d_V_d_0, parms.y_grid_size*sizeof(double));
     if (cs != cudaSuccess) {
         mexPrintf("Error allocating memory in the device for V_d: %s\n", cudaGetErrorString(cs));
     }
-    cs = cudaMalloc((void**)&d_V_d_1, parms.b_grid_size*parms.y_grid_size*sizeof(double));
+    cs = cudaMalloc((void**)&d_V_d_1, parms.y_grid_size*sizeof(double));
     if (cs != cudaSuccess) {
         mexPrintf("Error allocating memory in the device for V_d: %s\n", cudaGetErrorString(cs));
     }
@@ -127,7 +123,6 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     if (cs != cudaSuccess) {
         mexPrintf("Error allocating memory in the device for bond_policy: %s\n", cudaGetErrorString(cs));
     }
-
     // Copy the data from the host to the device and check for errors:
     cs = cudaMemcpy(d_b_grid, b_grid, parms.b_grid_size*sizeof(double), cudaMemcpyHostToDevice);
     if (cs != cudaSuccess) {
@@ -145,12 +140,10 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     if (cs != cudaSuccess) {
         mexPrintf("Error copying data from host to device for y_grid_under_default: %s\n", cudaGetErrorString(cs));
     }
-    
 
     // ! Apply Algorithm:
-    run(parms, d_default_policy);
-    //testor_3<<<1, parms.b_grid_size* parms.y_grid_size>>>(parms, d_default_policy, parms.b_grid_size* parms.y_grid_size);
-  
+    fill_device_constants(parms);
+    solve_arellano_model(parms, d_b_grid, d_y_grid, d_p_grid, d_y_grid_under_default, d_V, d_V_d_0, d_V_d_1, d_V_r_0, d_V_r_1, d_Q_0, d_Q_1, d_default_policy, d_bond_policy);
 
     // ! Export to MATLAB:
     // Create pointers to matrices in MATLAB:
@@ -159,7 +152,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     mxArray* p_grid_matlab = mxCreateDoubleMatrix(parms.y_grid_size * parms.y_grid_size, 1, mxREAL);
     mxArray* y_grid_under_default_matlab = mxCreateDoubleMatrix(parms.y_grid_size, 1, mxREAL);
     mxArray* V_matlab = mxCreateDoubleMatrix(parms.b_grid_size * parms.y_grid_size, 1, mxREAL);
-    mxArray* V_d_matlab = mxCreateDoubleMatrix(parms.b_grid_size * parms.y_grid_size, 1, mxREAL);
+    mxArray* V_d_matlab = mxCreateDoubleMatrix(parms.y_grid_size, 1, mxREAL);
     mxArray* V_r_matlab = mxCreateDoubleMatrix(parms.b_grid_size * parms.y_grid_size, 1, mxREAL);
     mxArray* Q_matlab = mxCreateDoubleMatrix(parms.b_grid_size * parms.y_grid_size, 1, mxREAL);
     mxArray* default_policy_matlab = mxCreateNumericMatrix(parms.b_grid_size * parms.y_grid_size, 1, mxINT32_CLASS, mxREAL);
@@ -179,27 +172,27 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
 
     
     // ! Take all the results to the host:
-    cs = cudaMemcpy(V, d_V_1, parms.b_grid_size * parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
+    cs = cudaMemcpy(V, d_V, parms.b_grid_size * parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
     if (cs != cudaSuccess) {
         mexPrintf("Error copying data from device to host for V: %s\n", cudaGetErrorString(cs));
     }
-    cudaMemcpy(V_d, d_V_d_1, parms.b_grid_size * parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
+    cs = cudaMemcpy(V_d, d_V_d_1, parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
     if (cs != cudaSuccess) {
         mexPrintf("Error copying data from device to host for V_d: %s\n", cudaGetErrorString(cs));
     }
-    cudaMemcpy(V_r, d_V_r_1, parms.b_grid_size * parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
+    cs = cudaMemcpy(V_r, d_V_r_1, parms.b_grid_size * parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
     if (cs != cudaSuccess) {
         mexPrintf("Error copying data from device to host for V_r: %s\n", cudaGetErrorString(cs));
     }
-    cudaMemcpy(Q, d_Q_1, parms.b_grid_size * parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
+    cs = cudaMemcpy(Q, d_Q_1, parms.b_grid_size * parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
     if (cs != cudaSuccess) {
         mexPrintf("Error copying data from device to host for Q: %s\n", cudaGetErrorString(cs));
     }
-    cudaMemcpy(default_policy, d_default_policy, parms.b_grid_size * parms.y_grid_size*sizeof(int), cudaMemcpyDeviceToHost);
+    cs = cudaMemcpy(default_policy, d_default_policy, parms.b_grid_size * parms.y_grid_size*sizeof(int), cudaMemcpyDeviceToHost);
     if (cs != cudaSuccess) {
         mexPrintf("Error copying data from device to host for default_policy: %s\n", cudaGetErrorString(cs));
     }
-    cudaMemcpy(bond_policy, d_bond_policy, parms.b_grid_size * parms.y_grid_size*sizeof(int), cudaMemcpyDeviceToHost);
+    cs = cudaMemcpy(bond_policy, d_bond_policy, parms.b_grid_size * parms.y_grid_size*sizeof(int), cudaMemcpyDeviceToHost);
     if (cs != cudaSuccess) {
         mexPrintf("Error copying data from device to host for bond_policy: %s\n", cudaGetErrorString(cs));
     }
@@ -213,7 +206,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     copy_vector(p_grid, p_grid_matlab_ptr, parms.y_grid_size*parms.y_grid_size);
     copy_vector(y_grid_under_default, y_grid_under_default_matlab_ptr, parms.y_grid_size);
     copy_vector(V, V_matlab_ptr, parms.b_grid_size*parms.y_grid_size);
-    copy_vector(V_d, V_d_matlab_ptr, parms.b_grid_size*parms.y_grid_size);
+    copy_vector(V_d, V_d_matlab_ptr, parms.y_grid_size);
     copy_vector(V_r, V_r_matlab_ptr, parms.b_grid_size*parms.y_grid_size);
     copy_vector(Q, Q_matlab_ptr, parms.b_grid_size*parms.y_grid_size);
     copy_vector(default_policy, default_policy_matlab_ptr, parms.b_grid_size*parms.y_grid_size);
@@ -255,8 +248,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     cudaFree(d_y_grid);
     cudaFree(d_p_grid);
     cudaFree(d_y_grid_under_default);
-    cudaFree(d_V_0);
-    cudaFree(d_V_1);
+    cudaFree(d_V);
     cudaFree(d_V_d_0);
     cudaFree(d_V_d_1);
     cudaFree(d_V_r_0);

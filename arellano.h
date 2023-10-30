@@ -3,8 +3,13 @@
 
 #include "aux_host.h"
 
-__global__ void testor_3(int x, int* d_default_policy, int grid_size);
+__global__ void d_guess_vd_vr_q(double* d_V_r_0, double* d_V_d_0, double* d_Q_0);
 
-void run(Parameters_host parms, int* d_default_policy);
+__global__ void update_v_and_default_policy(double* d_V, double* d_V_d_0, double* d_V_r_0, int* d_default_policy);
 
+__global__ void update_price(int d_default_policy, double* d_Q_1, double* d_p_grid);
+
+void solve_arellano_model(Parameters_host parms, double* d_b_grid, double* d_y_grid, double* d_p_grid, double* d_y_grid_under_default, double* d_V, double* d_V_d_0, double* d_V_d_1, double* d_V_r_0, double* d_V_r_1, double* d_Q_0, double* d_Q_1, int* d_default_policy, int* d_bond_policy);
+
+void fill_device_constants(Parameters_host parms);
 #endif
