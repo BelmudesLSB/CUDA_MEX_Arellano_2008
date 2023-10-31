@@ -7,7 +7,7 @@
 
 /*
 * This code is an implementation of Arellano (2008) using MEX and CUDA.
-* Lucas Belmudes, 10/26/2023.
+* Lucas Belmudes, 10/31/2023.
 */
 
 //! By default all variables are in the host. Else, they will have a d_ prefix.
