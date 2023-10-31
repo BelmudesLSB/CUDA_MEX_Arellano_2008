@@ -68,6 +68,9 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     double* d_Q_1;
     int* d_default_policy;
     int* d_bond_policy;
+    double* d_Err_q;
+    double* d_Err_vr;
+    double* d_Err_vd;
  
     // Allocate memory in the device:
     cudaError_t cs;
@@ -123,6 +126,18 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     if (cs != cudaSuccess) {
         mexPrintf("Error allocating memory in the device for bond_policy: %s\n", cudaGetErrorString(cs));
     }
+    cs = cudaMalloc((void**)&d_Err_q, parms.b_grid_size*parms.y_grid_size*sizeof(double));
+    if (cs != cudaSuccess) {
+        mexPrintf("Error allocating memory in the device for Err_q: %s\n", cudaGetErrorString(cs));
+    }
+    cs = cudaMalloc((void**)&d_Err_vr, parms.b_grid_size*parms.y_grid_size*sizeof(double));
+    if (cs != cudaSuccess) {
+        mexPrintf("Error allocating memory in the device for Err_vr: %s\n", cudaGetErrorString(cs));
+    }
+    cs = cudaMalloc((void**)&d_Err_vd, parms.y_grid_size*sizeof(double));
+    if (cs != cudaSuccess) {
+        mexPrintf("Error allocating memory in the device for Err_vd: %s\n", cudaGetErrorString(cs));
+    }
     // Copy the data from the host to the device and check for errors:
     cs = cudaMemcpy(d_b_grid, b_grid, parms.b_grid_size*sizeof(double), cudaMemcpyHostToDevice);
     if (cs != cudaSuccess) {
@@ -143,7 +158,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
 
     // ! Apply Algorithm:
     fill_device_constants(parms);
-    solve_arellano_model(parms, d_b_grid, d_y_grid, d_p_grid, d_y_grid_under_default, d_V, d_V_d_0, d_V_d_1, d_V_r_0, d_V_r_1, d_Q_0, d_Q_1, d_default_policy, d_bond_policy);
+    solve_arellano_model(parms, d_b_grid, d_y_grid, d_p_grid, d_y_grid_under_default, d_V, d_V_d_0, d_V_d_1, d_V_r_0, d_V_r_1, d_Q_0, d_Q_1, d_default_policy, d_bond_policy, d_Err_q, d_Err_vr, d_Err_vd);
 
     // ! Export to MATLAB:
     // Create pointers to matrices in MATLAB:
@@ -257,5 +272,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     cudaFree(d_Q_1);
     cudaFree(d_default_policy);
     cudaFree(d_bond_policy);
-
+    cudaFree(d_Err_q);
+    cudaFree(d_Err_vr);
+    cudaFree(d_Err_vd);
 }
