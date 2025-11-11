@@ -1,5 +1,6 @@
-#ifndef aux_host_h
-#define aux_host_h
+#ifndef HELPERS_H
+#define HELPERS_H
+
 #include <iostream>
 
 // Construction of bond grids:

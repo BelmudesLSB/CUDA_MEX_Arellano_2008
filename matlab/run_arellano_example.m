@@ -1,13 +1,11 @@
 %% Clear all:
-clc;
-clear all;
-
-%% Compile the MEXCUDA file:
-mexcuda main.cu aux_host.cpp arellano.cu
+clc; clear;
+% Add the compiled MEX folder to MATLAB path
+addpath('C:\Users\belmu\OneDrive\Escritorio\Lucas\Repositories\Arellano_CUDA_MEX\src');
 
 %% Calibrate the model:
 params.b_grid_size = 256;              % Number of points in the grid for the bond price.
-params.b_grid_min = -0.8;               % Minimum value of the bond price.
+params.b_grid_min = -0.4;               % Minimum value of the bond price.
 params.b_grid_max = 0.00;               % Maximum value of the bond price.
 params.y_grid_size = 51;                % Number of points in the grid for the income.
 params.y_default = 0.969;               % Maximum income under default.
@@ -24,6 +22,6 @@ params.m = 3;                           % Number of standard deviations for the 
 %% Run the MEXCUDA and store results:
 
 tic;
-solution = main(params);
+solution = arellano_mex(params);
 toc;
 

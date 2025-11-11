@@ -1,6 +1,6 @@
 #include <iostream>
 #include <cmath>
-#include "aux_host.h"
+#include "helpers.h"
 
 
 // Construction of bond grids:

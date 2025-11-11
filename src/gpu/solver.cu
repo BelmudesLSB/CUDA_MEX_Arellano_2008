@@ -1,16 +1,15 @@
-#include<iostream>
-#include<cuda_runtime.h>
-#include "math.h"
-#include "arellano.h"
-#include "aux_host.h"
+#include <iostream>
+#include <cuda_runtime.h>
+#include <math.h>
+#include "solver.h"               
+#include "../host/helpers.h"      
 #include "mex.h"
-#include "constants.h"
+#include "device_constants.h"     
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/sequence.h>
 #include <thrust/fill.h>
 #include <thrust/transform.h>
-
 
 __global__ void d_guess_vd_vr_q(double* d_V_r_0, double* d_V_d_0, double* d_Q_0){    
     int thread_id = blockIdx.x * blockDim.x + threadIdx.x;

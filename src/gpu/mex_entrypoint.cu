@@ -1,9 +1,9 @@
 #include <iostream>
 #include <cuda_runtime.h>
-#include "constants.h"
+#include "device_constants.h"   
 #include "mex.h"
-#include "aux_host.h"
-#include "arellano.h"
+#include "../host/helpers.h"    
+#include "solver.h"             
 
 /*
 * This code is an implementation of Arellano (2008) using MEX and CUDA.

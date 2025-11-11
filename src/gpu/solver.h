@@ -1,7 +1,7 @@
-#ifndef arellano_h
-#define arellano_h
+#ifndef SOLVER_H
+#define SOLVER_H
 
-#include "aux_host.h"
+#include "../host/helpers.h"
 
 __global__ void d_guess_vd_vr_q(double* d_V_r_0, double* d_V_d_0, double* d_Q_0);
 
