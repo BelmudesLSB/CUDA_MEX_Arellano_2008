@@ -58,4 +58,13 @@ function plot_value_function(solution)
     grid on;
 
     hold off;
+
+    % --- Save figure automatically in /figures folder
+figDir = fullfile(pwd, 'figures');
+if ~exist(figDir, 'dir')
+    mkdir(figDir);
+end
+
+saveas(gcf, fullfile(figDir, 'value_function.png'));
+
 end
