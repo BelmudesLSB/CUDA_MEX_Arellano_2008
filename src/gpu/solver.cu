@@ -1,16 +1,46 @@
 #include <iostream>
 #include <cuda_runtime.h>
 #include <math.h>
-#include "solver.h"               
-#include "../host/helpers.h"      
-#include "mex.h"
-#include "device_constants.h"     
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/sequence.h>
 #include <thrust/fill.h>
 #include <thrust/transform.h>
 
+#include "solver.h"               
+#include "../host/helpers.h"      
+#include "mex.h"
+#include "device_constants.h"     
+
+
+/*
+  ================================================================
+   GPU SOLVER FOR THE ARELLANO (2008) SOVEREIGN DEFAULT MODEL
+   ------------------------------------------------------------
+   Implements all CUDA kernels and the main solver loop.
+
+   The model solves for equilibrium bond prices (Q), value functions
+   under repayment (V_r) and default (V_d), and policy functions
+   (default decision and next-period debt).
+
+   The iteration proceeds as:
+     1. Initialize guesses for Q, V_r, and V_d.
+     2. Iterate until convergence:
+          - Update total value function and default policy.
+          - Update bond price schedule.
+          - Update default-state value.
+          - Update repayment-state value and bond policy.
+          - Compute maximum absolute differences.
+     3. Stop when errors fall below tolerance or max_iter reached.
+
+   Lucas Belmudes — 10/31/2023
+  ================================================================
+*/
+
+
+// -----------------------------------------------------------------------------
+// 1) INITIAL GUESSES
+// -----------------------------------------------------------------------------
 __global__ void d_guess_vd_vr_q(double* d_V_r_0, double* d_V_d_0, double* d_Q_0){    
     int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     int y_id = blockIdx.x;
@@ -25,6 +55,16 @@ __global__ void d_guess_vd_vr_q(double* d_V_r_0, double* d_V_d_0, double* d_Q_0)
     }
 }
 
+// -----------------------------------------------------------------------------
+// 2) VALUE FUNCTION AND DEFAULT DECISION
+// -----------------------------------------------------------------------------
+/*
+   Compares the value of repayment (V_r) and default (V_d).
+   For each (y,b):
+     - If V_r ≥ V_d → repay (default_policy = 0)
+     - Else          → default (default_policy = 1)
+   Stores the optimal value V = max(V_r, V_d).
+*/
 __global__ void update_v_and_default_policy(double* d_V, double* d_V_d_0, double* d_V_r_0, int* d_default_policy){
     int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     int y_id = blockIdx.x; 
@@ -44,6 +84,14 @@ __global__ void update_v_and_default_policy(double* d_V, double* d_V_d_0, double
     }
 }
 
+// -----------------------------------------------------------------------------
+// 3) PRICE FUNCTION UPDATE
+// -----------------------------------------------------------------------------
+/*
+   Updates Q(b,y) according to the zero-profit condition for lenders:
+     Q(b,y) = E[ (1 − d_default_policy(y′,b)) / (1 + r) ]
+   i.e., the price equals the discounted probability of repayment.
+*/
 __global__ void update_price(int* d_default_policy, double* d_Q_1, double* d_p_grid){
     int b_id = threadIdx.x;
     int y_id = blockIdx.x;
@@ -59,6 +107,16 @@ __global__ void update_price(int* d_default_policy, double* d_Q_1, double* d_p_g
     }
 }
 
+// -----------------------------------------------------------------------------
+// 4) DEFAULT-STATE VALUE FUNCTION
+// -----------------------------------------------------------------------------
+/*
+   Updates V_d(y):
+     V_d(y) = u(y_d) + β [ θ E[V(y′,b′=Bmax)] + (1−θ) E[V_d(y′)] ]
+   where:
+     - u(y_d) is utility under default income (fixed at y_def or capped)
+     - E[·] are expectations over next-period income states.
+*/
 __global__ void update_vd(double* d_V_d_0, double* d_V_d_1, double* d_V, double* d_p_grid, double* d_y_grid_under_default){
     int y_id = threadIdx.x;
     double E_v = 0;
@@ -71,6 +129,18 @@ __global__ void update_vd(double* d_V_d_0, double* d_V_d_1, double* d_V, double*
     d_V_d_1[y_id] = (1/(1-d_gamma)) * pow(d_y_grid_under_default[y_id], 1-d_gamma) + d_beta * (d_theta * E_v + (1-d_theta) * E_vd);
 }
 
+// -----------------------------------------------------------------------------
+// 5) REPAYMENT-STATE VALUE FUNCTION AND BOND POLICY
+// -----------------------------------------------------------------------------
+/*
+   For each (b,y), searches over all possible next-period debt levels b′ to
+   maximize:
+       V_r(b,y) = max_{b′} [ u(c) + β E[V(b′,y′)] ],
+   subject to c = y − Q(b′,y)·b′ + b  and c > 0.
+   Stores:
+     - Optimal value V_r_1(b,y)
+     - Optimal bond index (policy) b′*(b,y)
+*/
 __global__ void update_vr_and_bond_policy(double* d_b_grid, double* d_Q_1, double* d_y_grid, double* d_p_grid, double* d_V_r_1, double* d_V, int* d_bond_policy){
     int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     int y_id = blockIdx.x;
@@ -100,6 +170,13 @@ __global__ void update_vr_and_bond_policy(double* d_b_grid, double* d_Q_1, doubl
     }
 }
 
+// -----------------------------------------------------------------------------
+// 6) DISTANCE COMPUTATION
+// -----------------------------------------------------------------------------
+/*
+   Computes element-wise absolute difference |F − G| to monitor convergence.
+   Used for value functions and bond prices.
+*/
 __global__ void compute_distance(double* d_F, double* d_G, double* d_Err){
     int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_id < d_b_grid_size * d_y_grid_size)
@@ -108,6 +185,22 @@ __global__ void compute_distance(double* d_F, double* d_G, double* d_Err){
     }
 }
 
+// -----------------------------------------------------------------------------
+// 7) HOST-SIDE SOLVER LOOP
+// -----------------------------------------------------------------------------
+/*
+   Main fixed-point iteration controlling all kernels.
+
+   Iteration steps:
+     1. Initialize guesses (V_r_0, V_d_0, Q_0).
+     2. Iterate:
+          a) update V and default policy
+          b) update Q
+          c) update V_d
+          d) update V_r and bond policy
+          e) compute distances and check convergence
+     3. Stop when all errors < tol or max_iter reached.
+*/
 void solve_arellano_model(Parameters_host parms, double* d_b_grid, double* d_y_grid, double* d_p_grid, double* d_y_grid_under_default, double* d_V, double* d_V_d_0, double* d_V_d_1, double* d_V_r_0, double* d_V_r_1, double* d_Q_0, double* d_Q_1, int* d_default_policy, int* d_bond_policy, double* d_Err_q, double* d_Err_vr, double* d_Err_vd){
     mexPrintf("Running GPU code...\n");
     double error_q = 1;
@@ -152,6 +245,13 @@ void solve_arellano_model(Parameters_host parms, double* d_b_grid, double* d_y_g
     }
 }
 
+// -----------------------------------------------------------------------------
+// 8) CONSTANT MEMORY INITIALIZATION
+// -----------------------------------------------------------------------------
+/*
+   Copies scalar parameters from host struct to GPU constant memory.
+   This allows kernels to read them quickly without passing as arguments.
+*/
 void fill_device_constants(Parameters_host parms){
     cudaError_t cs;
     cs = cudaMemcpyToSymbol(d_b_grid_size, &(parms.b_grid_size), sizeof(int));

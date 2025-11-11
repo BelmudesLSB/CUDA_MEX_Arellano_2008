@@ -1,7 +1,7 @@
 #include <iostream>
 #include <cmath>
-#include "helpers.h"
 
+#include "helpers.h"
 
 // Construction of bond grids:
 void create_bond_grids(double* prt_bond_grid, int Nb, double Bmax, double Bmin){

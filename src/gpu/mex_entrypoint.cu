@@ -6,9 +6,27 @@
 #include "solver.h"             
 
 /*
-* This code is an implementation of Arellano (2008) using MEX and CUDA.
-* Lucas Belmudes, 10/31/2023.
+  ============================================================
+   Arellano (2008) Sovereign Default Model – CUDA + MATLAB MEX
+  ============================================================
+
+   This MEX entrypoint loads model parameters from MATLAB, constructs
+   all grids and transition matrices on the host, allocates and transfers
+   data to the GPU, runs the CUDA solver, and returns the results
+   back to MATLAB as a structured output.
+
+   Author:  Lucas Belmudes
+   Created: October 31, 2023
+
+   -----------------------------------------------------------------
+   Key idea:
+   The model solves for equilibrium bond prices, value functions,
+   and policies using GPU parallelization for the dynamic programming
+   iteration.
+   -----------------------------------------------------------------
 */
+
+// Convention: host variables have plain names; GPU device variables use a d_ prefix.
 
 //! By default all variables are in the host. Else, they will have a d_ prefix.
 
@@ -38,7 +56,10 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     parms.max_iter = static_cast<int>(mxGetScalar(mxGetField(parmsStruct, 0, "max_iter")));
     parms.m = static_cast<double>(mxGetScalar(mxGetField(parmsStruct, 0, "m")));
 
-    // ! Create the grids:
+    // ============================================================
+    // 2. Construct the Grids in the Host
+    // ============================================================
+
     // Construct the grids in the host:
     double* b_grid = new double[parms.b_grid_size];
     double* y_grid = new double[parms.y_grid_size];
@@ -50,13 +71,16 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     double* Q = new double[parms.b_grid_size*parms.y_grid_size];
     int* default_policy = new int[parms.b_grid_size*parms.y_grid_size];
     int* bond_policy = new int[parms.b_grid_size*parms.y_grid_size];
+
     // Create all host grids:
     create_bond_grids(b_grid, parms.b_grid_size, parms.b_grid_max, parms.b_grid_min);
     create_income_and_prob_grids(y_grid, p_grid, parms.y_grid_size, parms.sigma, parms.rho, parms.m);
     create_income_under_default(y_grid_under_default, y_grid, parms.y_grid_size, parms.y_default);
 
+   // ============================================================
+    // 3. Allocate GPU memory and transfer data to device
+    // ============================================================
 
-    // ! Create the grids in the device:
     // Create device pointer:
     double* d_b_grid;
     double* d_y_grid;
@@ -141,6 +165,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     if (cs != cudaSuccess) {
         mexPrintf("Error allocating memory in the device for Err_vd: %s\n", cudaGetErrorString(cs));
     }
+    
     // Copy the data from the host to the device and check for errors:
     cs = cudaMemcpy(d_b_grid, b_grid, parms.b_grid_size*sizeof(double), cudaMemcpyHostToDevice);
     if (cs != cudaSuccess) {
@@ -159,12 +184,19 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
         mexPrintf("Error copying data from host to device for y_grid_under_default: %s\n", cudaGetErrorString(cs));
     }
 
-    // ! Apply Algorithm:
+    // ============================================================
+    // 4. Run the model on the GPU
+    // ============================================================
+
+    // Copy scalar parameters to GPU constant memory and launch the CUDA solver.
     fill_device_constants(parms);
     solve_arellano_model(parms, d_b_grid, d_y_grid, d_p_grid, d_y_grid_under_default, d_V, d_V_d_0, d_V_d_1, d_V_r_0, d_V_r_1, d_Q_0, d_Q_1, d_default_policy, d_bond_policy, d_Err_q, d_Err_vr, d_Err_vd);
 
-    // ! Export to MATLAB:
-    // Create pointers to matrices in MATLAB:
+    // ============================================================
+    // 5. Prepare MATLAB outputs
+    // ============================================================
+
+    // Allocate MATLAB arrays for outputs (flattened column vectors).
     mxArray* y_grid_matlab = mxCreateDoubleMatrix(parms.y_grid_size, 1, mxREAL);
     mxArray* b_grid_matlab = mxCreateDoubleMatrix(parms.b_grid_size, 1, mxREAL);
     mxArray* p_grid_matlab = mxCreateDoubleMatrix(parms.y_grid_size * parms.y_grid_size, 1, mxREAL);
@@ -189,7 +221,11 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     int* bond_policy_matlab_ptr = (int*)mxGetData(bond_policy_matlab);
 
     
-    // ! Take all the results to the host:
+    // ============================================================
+    // 6. Transfer results back from GPU to host
+    // ============================================================
+
+    // Copy final results from device to host arrays.
     cs = cudaMemcpy(V, d_V, parms.b_grid_size * parms.y_grid_size*sizeof(double), cudaMemcpyDeviceToHost);
     if (cs != cudaSuccess){
         mexPrintf("Error copying data from device to host for V: %s\n", cudaGetErrorString(cs));
@@ -216,9 +252,10 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     }
 
 
+    // ============================================================
+    // 7. Copy results from host arrays into MATLAB outputs
+    // ============================================================
 
-    // ! Export result from the host to MATLAB.  
-    // Copy the data from the host to the MATLAB pointers:
     copy_vector(y_grid, y_grid_matlab_ptr, parms.y_grid_size);
     copy_vector(b_grid, b_grid_matlab_ptr, parms.b_grid_size);
     copy_vector(p_grid, p_grid_matlab_ptr, parms.y_grid_size*parms.y_grid_size);
@@ -230,14 +267,12 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     copy_vector(default_policy, default_policy_matlab_ptr, parms.b_grid_size*parms.y_grid_size);
     copy_vector(bond_policy, bond_policy_matlab_ptr, parms.b_grid_size*parms.y_grid_size);
 
-
-
-    // ! Export to MATLAB.  
-    // Create the output struct:
+    // Create the MATLAB struct to hold all outputs.    
     const int nfields = 10;
     const char* fieldNames[nfields] = {"y_grid", "b_grid", "P", "y_grid_under_default", "V", "V_d", "V_r", "Q", "default_policy", "bond_policy"};
     plhs[0] = mxCreateStructMatrix(1, 1, nfields, fieldNames);
-    // Copy the matrices to the output struct:
+
+    // Assign each output variable to its corresponding field.
     mxSetField(plhs[0], 0, "y_grid", y_grid_matlab);
     mxSetField(plhs[0], 0, "b_grid", b_grid_matlab);
     mxSetField(plhs[0], 0, "P", p_grid_matlab);
@@ -248,10 +283,10 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     mxSetField(plhs[0], 0, "Q", Q_matlab);
     mxSetField(plhs[0], 0, "default_policy", default_policy_matlab);
     mxSetField(plhs[0], 0, "bond_policy", bond_policy_matlab);
-    
 
-
-    // ! Free the memory:
+    // ============================================================
+    // 8. Free all host and device memory
+    // ============================================================
     delete[] b_grid;
     delete[] y_grid;
     delete[] p_grid;
@@ -262,6 +297,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     delete[] Q;
     delete[] default_policy;
     delete[] bond_policy;
+    
     cudaFree(d_b_grid);
     cudaFree(d_y_grid);
     cudaFree(d_p_grid);
