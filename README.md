@@ -25,7 +25,7 @@ Key steps:
 - Error tracking via Thrust for clean convergence evaluation
 
 ## Project Structure
-
+```
 SovereignDefault-GPU-Solver/
 │
 ├── host/
@@ -42,3 +42,4 @@ SovereignDefault-GPU-Solver/
 │
 ├── README.md
 └── LICENSE
+```
