@@ -3,18 +3,27 @@
 #include "device_constants.h"   
 #include "mex.h"
 #include "../host/helpers.h"    
-#include "solver.h"             
+#include "solver.h"
 
-/*
-* This code is an implementation of Arellano (2008) using MEX and CUDA.
-* Lucas Belmudes, 10/31/2023.
-*/
+// ============================================================
+// Helper macro for safe CUDA memory allocation
+// ============================================================
+#define CUDA_MALLOC(ptr, size) \
+{ \
+    cudaError_t err = cudaMalloc((void**)&(ptr), (size)); \
+    if (err != cudaSuccess) { \
+        mexErrMsgIdAndTxt("CUDA:MemoryError", \
+            "Failed to allocate %s (%s)", #ptr, cudaGetErrorString(err)); \
+    } \
+}
 
 //! By default all variables are in the host. Else, they will have a d_ prefix.
 
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     
-    // ! Load and unload the parameters from matlab:
+    // ============================================================
+    // 1. Load Parameters from MATLAB
+    // ============================================================
     // Read the input parameters from MATLAB
     const mxArray* parmsStruct = prhs[0];
     // Create an instance of the parameters class
@@ -72,89 +81,33 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]){
     double* d_Err_vr;
     double* d_Err_vd;
  
-    // Allocate memory in the device:
-    cudaError_t cs;
-    cs = cudaMalloc((void**)&d_b_grid, parms.b_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for b_grid: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_y_grid, parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for y_grid: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_p_grid, parms.y_grid_size*parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for p_grid: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_y_grid_under_default, parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for y_grid_under_default: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_V, parms.b_grid_size*parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for V: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_V_d_0, parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for V_d: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_V_d_1, parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for V_d: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_V_r_0, parms.b_grid_size*parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for V_r: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_V_r_1, parms.b_grid_size*parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for V_r: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_Q_0, parms.b_grid_size*parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for Q: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_Q_1, parms.b_grid_size*parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for Q: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_default_policy, parms.b_grid_size*parms.y_grid_size*sizeof(int));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for default_policy: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_bond_policy, parms.b_grid_size*parms.y_grid_size*sizeof(int));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for bond_policy: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_Err_q, parms.b_grid_size*parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for Err_q: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_Err_vr, parms.b_grid_size*parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for Err_vr: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMalloc((void**)&d_Err_vd, parms.y_grid_size*sizeof(double));
-    if (cs != cudaSuccess) {
-        mexPrintf("Error allocating memory in the device for Err_vd: %s\n", cudaGetErrorString(cs));
-    }
-    // Copy the data from the host to the device and check for errors:
-    cs = cudaMemcpy(d_b_grid, b_grid, parms.b_grid_size*sizeof(double), cudaMemcpyHostToDevice);
-    if (cs != cudaSuccess) {
-        mexPrintf("Error copying data from host to device for b_grid: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMemcpy(d_y_grid, y_grid, parms.y_grid_size*sizeof(double), cudaMemcpyHostToDevice);
-    if (cs != cudaSuccess) {
-        mexPrintf("Error copying data from host to device for y_grid: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMemcpy(d_p_grid, p_grid, parms.y_grid_size*parms.y_grid_size*sizeof(double), cudaMemcpyHostToDevice);
-    if (cs != cudaSuccess) {
-        mexPrintf("Error copying data from host to device for p_grid: %s\n", cudaGetErrorString(cs));
-    }
-    cs = cudaMemcpy(d_y_grid_under_default, y_grid_under_default, parms.y_grid_size*sizeof(double), cudaMemcpyHostToDevice);
-    if (cs != cudaSuccess) {
-        mexPrintf("Error copying data from host to device for y_grid_under_default: %s\n", cudaGetErrorString(cs));
-    }
+    // ============================================================
+    // Allocate device memory safely using helper macro
+    // ============================================================
+    
+    // Grids:
+    CUDA_MALLOC(d_b_grid, parms.b_grid_size * sizeof(double));
+    CUDA_MALLOC(d_y_grid, parms.y_grid_size * sizeof(double));
+    CUDA_MALLOC(d_p_grid, parms.y_grid_size * parms.y_grid_size * sizeof(double));
+    CUDA_MALLOC(d_y_grid_under_default, parms.y_grid_size * sizeof(double));
+
+    // Value and price arrays:
+    CUDA_MALLOC(d_V,      parms.b_grid_size * parms.y_grid_size * sizeof(double));
+    CUDA_MALLOC(d_V_d_0,  parms.y_grid_size * sizeof(double));
+    CUDA_MALLOC(d_V_d_1,  parms.y_grid_size * sizeof(double));
+    CUDA_MALLOC(d_V_r_0,  parms.b_grid_size * parms.y_grid_size * sizeof(double));
+    CUDA_MALLOC(d_V_r_1,  parms.b_grid_size * parms.y_grid_size * sizeof(double));
+    CUDA_MALLOC(d_Q_0,    parms.b_grid_size * parms.y_grid_size * sizeof(double));
+    CUDA_MALLOC(d_Q_1,    parms.b_grid_size * parms.y_grid_size * sizeof(double));
+
+    // Policies:
+    CUDA_MALLOC(d_default_policy, parms.b_grid_size * parms.y_grid_size * sizeof(int));
+    CUDA_MALLOC(d_bond_policy,    parms.b_grid_size * parms.y_grid_size * sizeof(int));
+
+    // Error arrays:
+    CUDA_MALLOC(d_Err_q,  parms.b_grid_size * parms.y_grid_size * sizeof(double));
+    CUDA_MALLOC(d_Err_vr, parms.b_grid_size * parms.y_grid_size * sizeof(double));
+    CUDA_MALLOC(d_Err_vd, parms.y_grid_size * sizeof(double));
 
     // ! Apply Algorithm:
     fill_device_constants(parms);
